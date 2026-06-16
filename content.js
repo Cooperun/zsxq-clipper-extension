@@ -5,10 +5,81 @@
   'use strict';
 
   const CLIP_BTN_CLASS = 'zsxq-clip-btn';
-  const IMG_SERVER = 'http://127.0.0.1:8765/save-image';
 
   // 收集当前剪藏的所有图片 URL（用于后续下载）
   let collectedImages = [];
+
+  // ===== File System Access 落盘（取代本地 server）=====
+  const FS_DB = 'zsxq-clipper-fs';
+  const FS_STORE = 'dirs';
+  let dirHandle = null;
+
+  // IndexedDB 句柄存取（极简）
+  function idbOpen() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(FS_DB, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore(FS_STORE);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  async function idbGet(store, key) {
+    const db = await idbOpen();
+    return new Promise((res, rej) => {
+      const t = db.transaction(store).objectStore(store).get(key);
+      t.onsuccess = () => res(t.result);
+      t.onerror = () => rej(t.error);
+    });
+  }
+  async function idbSet(store, key, val) {
+    const db = await idbOpen();
+    return new Promise((res, rej) => {
+      const t = db.transaction(store, 'readwrite').objectStore(store).put(val, key);
+      t.onsuccess = () => res();
+      t.onerror = () => rej(t.error);
+    });
+  }
+
+  async function getClipDir() {
+    if (dirHandle) return dirHandle;
+    // 从 IndexedDB 恢复已授权句柄
+    dirHandle = await idbGet(FS_STORE, 'clips');
+    if (dirHandle) {
+      const perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+      if (perm === 'granted') return dirHandle;
+      const req = await dirHandle.requestPermission({ mode: 'readwrite' }); // 需用户手势
+      if (req === 'granted') return dirHandle;
+    }
+    throw new Error('未授权目录');
+  }
+
+  async function authorizeDir() {
+    dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    await idbSet(FS_STORE, 'clips', dirHandle);
+    return dirHandle;
+  }
+
+  async function saveMarkdownLocal(filename, content) {
+    const dir = await getClipDir();
+    const fh = await dir.getFileHandle(filename, { create: true });
+    const w = await fh.createWritable();
+    await w.write(content);
+    await w.close();
+    return dir.name + '/' + filename;
+  }
+
+  // 递归创建 assets/<folder>/，写图片返回相对路径
+  async function saveImageLocal(folder, hash, blob) {
+    const dir = await getClipDir();
+    const assetsDir = await dir.getDirectoryHandle('assets', { create: true });
+    const subDir = await assetsDir.getDirectoryHandle(folder, { create: true });
+    const ext = ((blob.type || 'image/jpeg').split('/')[1] || 'jpeg').replace('svg+xml', 'svg');
+    const fh = await subDir.getFileHandle(`${hash}.${ext}`, { create: true });
+    const w = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+    return `assets/${folder}/${hash}.${ext}`;
+  }
 
   // 简单 hash（用 URL 生成短文件名）
   function hashUrl(url) {
@@ -353,24 +424,6 @@
     return md;
   }
 
-  // 通过 background.js 发送到本地服务
-  async function saveToServer(md, filename) {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        { type: 'clip', content: md, filename },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (response && response.ok) {
-            resolve(response);
-          } else {
-            reject(new Error(response?.error || 'Unknown error'));
-          }
-        }
-      );
-    });
-  }
-
   // 添加剪藏按钮
   function addClipButton(appTopic) {
     if (appTopic.querySelector('.' + CLIP_BTN_CLASS)) return;
@@ -468,30 +521,7 @@
               const resp = await fetch(imgUrl);
               if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
               const blob = await resp.blob();
-              const mime = blob.type || 'image/jpeg';
-
-              // 转 base64
-              const b64 = await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                reader.readAsDataURL(blob);
-              });
-
-              // 发到本地服务保存
-              const saveResp = await fetch(IMG_SERVER, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  folder: assetFolder,
-                  urlHash: hashUrl(imgUrl),
-                  data: b64,
-                  mime
-                })
-              });
-              const saveData = await saveResp.json();
-              if (saveData.ok) {
-                urlToLocal[imgUrl] = saveData.path;
-              }
+              urlToLocal[imgUrl] = await saveImageLocal(assetFolder, hashUrl(imgUrl), blob);
             } catch (imgErr) {
               console.warn('[剪藏] 图片下载失败:', imgUrl, imgErr.message);
             }
@@ -508,16 +538,22 @@
         }
 
         btn.textContent = '⏳ 保存中...';
-        const result = await saveToServer(md, filename);
-
-        if (result.ok) {
-          btn.textContent = '✅ 已保存';
-          btn.style.background = 'linear-gradient(135deg, #059669, #10b981)';
-          const hasArticle = articleContents.some(c => c);
-          console.log('[剪藏] 已保存:', result.path, hasArticle ? '(含外链正文)' : '', collectedImages.length ? `(${collectedImages.length}张图片)` : '');
-        } else {
-          throw new Error('Server error');
+        let savedPath;
+        try {
+          savedPath = await saveMarkdownLocal(filename, md); // File System Access
+        } catch (e) {
+          if (e.message === '未授权目录') {
+            btn.textContent = '📋 请先授权目录';
+            setTimeout(() => authorizeDir().then(() => alert('已授权 ~/zsxq-clips,请重新点剪藏')), 100);
+            return;
+          }
+          throw e;
         }
+        console.log('[剪藏] 已保存到本地:', savedPath);
+        btn.textContent = '✅ 已保存';
+        btn.style.background = 'linear-gradient(135deg, #059669, #10b981)';
+        const hasArticle = articleContents.some(c => c);
+        console.log('[剪藏] 已保存:', savedPath, hasArticle ? '(含外链正文)' : '', collectedImages.length ? `(${collectedImages.length}张图片)` : '');
       } catch (err) {
         console.error('[剪藏] 错误:', err);
         btn.textContent = '❌ 失败';
