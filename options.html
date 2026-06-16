@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>知识星球剪藏 - 设置</title>
+<style>body{font-family:-apple-system,sans-serif;max-width:520px;padding:20px}
+label{display:block;margin:12px 0 4px}input,textarea{width:100%;padding:6px;box-sizing:border-box}
+button{margin-top:16px;padding:8px 16px;background:#4ecca3;border:0;border-radius:6px;cursor:pointer}
+#msg{color:#059669;margin-top:8px}</style></head>
+<body>
+<h2>设置</h2>
+<label>智谱 GLM API Key<input id="apiKey" type="password" placeholder="智谱开放平台的 key"></label>
+<label>模型(默认 glm-4-flash)<input id="model" placeholder="glm-4-flash"></label>
+<label>我关注的领域(一段话,作为评分参考)<textarea id="focus" rows="3" placeholder="AI 编程、独立开发、RAG..."></textarea></label>
+<button id="save">保存</button>
+<div id="msg"></div>
+<script src="options.js"></script>
+</body></html>
