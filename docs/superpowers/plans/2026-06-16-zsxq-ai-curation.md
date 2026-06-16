@@ -470,32 +470,37 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mapTopic, fetchToday } from '../lib/zsxq-api.mjs';
 
-test('mapTopic: API 原始字段 → 内部摘要', () => {
+test('mapTopic: API 原始字段 → 内部摘要(实测字段)', () => {
   const raw = {
-    topic_id: 't1', type: 'talk', create_time: 1718500000000,
-    owner: { name: '张三' },
-    talk: { text: '正文', owner: { name: '张三' }, images: [{ url: 'http://a' }] },
-    like_count: 12, comments_count: 3
+    topic_id: 22255245281241280, type: 'talk',
+    create_time: '2026-06-16T23:54:57.185+0800', title: '',
+    likes_count: 12, comments_count: 3, digested: true,
+    talk: { owner: { name: '张三' }, text: '正文', images: [
+      { image_id: 1, type: 'png', thumbnail: { url: 'http://t' }, large: { url: 'http://l' }, original: { url: 'http://o' } }
+    ] }
   };
   const m = mapTopic(raw);
-  assert.equal(m.topic_id, 't1');
+  assert.equal(m.topic_id, '22255245281241280');
   assert.equal(m.author, '张三');
   assert.equal(m.text, '正文');
   assert.equal(m.likes, 12);
   assert.equal(m.comments, 3);
-  assert.deepEqual(m.images, ['http://a']);
+  assert.equal(m.digest, true);
+  assert.equal(m.create_time, '2026-06-16T23:54:57.185+0800');
+  assert.deepEqual(m.images, ['http://l']); // 取 large.url
 });
 
-test('fetchToday: 用 mock fetch + token,单页即返回(无翻页)', async () => {
-  const page = { resp_data: { topics: [
-    { topic_id: 't1', create_time: Date.now(), talk: { text: 'a'.repeat(120) }, like_count: 5, owner: { name: 'x' } }
+test('fetchToday: mock fetch 单页返回(scope=all,credentials include,无 token)', async () => {
+  const page = { succeeded: true, code: 0, resp_data: { topics: [
+    { topic_id: 't1', create_time: '2026-06-16T23:54:57.185+0800', likes_count: 5, comments_count: 0, digested: false, talk: { text: 'a'.repeat(120), owner: { name: 'x' } } }
   ] } };
   const calls = [];
-  const fakeFetch = async (url) => { calls.push(url); return { json: async () => page }; };
-  const topics = await fetchToday({ groupId: 'g1', token: 'tok', fetch: fakeFetch, isBeforeToday: () => false });
+  const fakeFetch = async (url, opts) => { calls.push({ url, opts }); return { json: async () => page }; };
+  const topics = await fetchToday({ groupId: 'g1', fetch: fakeFetch, isBeforeToday: () => false });
   assert.equal(topics.length, 1);
-  assert.ok(calls[0].includes('/v2/groups/g1/topics'));
-  assert.ok(calls[0].includes('Authorization') || true); // token 在 header 非 url,见实现
+  assert.ok(calls[0].url.includes('/v2/groups/g1/topics'));
+  assert.ok(calls[0].url.includes('scope=all'));
+  assert.equal(calls[0].opts.credentials, 'include'); // 认证靠 cookie
 });
 ```
 
@@ -516,36 +521,46 @@ export function mapTopic(t) {
   const talk = t.talk || {};
   return {
     topic_id: String(t.topic_id),
-    type: t.type,
-    create_time: t.create_time,
-    author: t.owner?.name || talk.owner?.name || '匿名',
+    type: t.type,                                              // "talk" / "q&a"
+    create_time: t.create_time,                                // ISO 字符串 "2026-06-16T23:54:57.185+0800"
+    author: talk.owner?.name || '匿名',
     title: t.title || (talk.text || '').slice(0, 50),
     text: talk.text || '',
-    likes: t.like_count ?? t.show_likes_count ?? 0,
-    comments: t.comments_count ?? t.show_comments_count ?? 0,
-    digest: t.type === 'digest' || !!talk.digest || !!t.is_digest,
-    images: (talk.images || []).map(i => i.url || i.original?.url).filter(Boolean),
+    likes: t.likes_count ?? 0,                                  // 实测:likes_count
+    comments: t.comments_count ?? 0,                            // 实测:comments_count
+    digest: !!t.digested,                                       // 实测:digested (boolean)
+    rewards: t.rewards_count ?? 0,                             // 打赏(可选质量信号)
+    reading: t.reading_count ?? 0,                             // 阅读(可选质量信号)
+    images: (talk.images || []).map(i => i.large?.url || i.thumbnail?.url || i.original?.url).filter(Boolean),
     codeBlocks: ((talk.text || '').match(/```/g) || []).length / 2,
     links: (talk.text || '').match(/https?:\/\//g)?.length || 0
   };
 }
 
-// isBeforeToday(create_time_ms) → bool,决定翻页终止
-export async function fetchToday({ groupId, token, fetch: f = fetch, isBeforeToday, maxPages = 20 }) {
-  let endKey = ''; // 空 = 最新一页
+// create_time 是 ISO 字符串,减 1ms 避免与上一页最后一条重叠(end_time 闭区间)
+function isoMinus1ms(iso) {
+  return new Date(new Date(iso).getTime() - 1).toISOString();
+}
+
+// 认证靠 httpOnly cookie:fetch 必须 credentials:'include'(实测,见 docs/api-reference.md)
+// isBeforeToday(create_time_iso) → bool,决定翻页终止
+export async function fetchToday({ groupId, fetch: f = fetch, isBeforeToday, maxPages = 20, count = 20 }) {
   const out = [];
+  let endTime = null;
   for (let p = 0; p < maxPages; p++) {
-    const url = `${BASE}/v2/groups/${groupId}/topics?scope=by_create_time&count=20` +
-      (endKey ? `&end_time=${endKey}` : '');
-    const resp = await f(url, { headers: { 'Authorization': token } });
+    const params = new URLSearchParams({ scope: 'all', count: String(count) });
+    if (endTime) params.set('end_time', endTime);
+    const resp = await f(`${BASE}/v2/groups/${groupId}/topics?${params}`, { credentials: 'include' });
     const data = await resp.json();
+    if (!data.succeeded) throw new Error('zsxq API 错误: ' + (data.error || data.code));
     const topics = data?.resp_data?.topics || [];
     if (!topics.length) break;
     for (const t of topics) {
       if (isBeforeToday && isBeforeToday(t.create_time)) return out; // 翻到昨天,停
       out.push(mapTopic(t));
     }
-    endKey = String(topics[topics.length - 1].create_time - 1); // 下一页游标
+    if (topics.length < count) break; // 不满一页 = 到底
+    endTime = isoMinus1ms(topics[topics.length - 1].create_time); // 下一页游标
   }
   return out;
 }
@@ -645,8 +660,9 @@ async function handleScanToday({ groupId, todayStr }) {
   const isBeforeToday = (ts) => new Date(ts).toDateString() !== new Date().toDateString();
   let topics;
   try {
-    const token = (await chrome.storage.local.get('zsxqToken')).zsxqToken;
-    topics = await fetchToday({ groupId, token, isBeforeToday });
+    // 认证靠 httpOnly cookie(credentials:'include',见 lib/zsxq-api.mjs + docs/api-reference.md)
+    // background SW 对 host-permission 域 fetch 会带 cookie;若实测 401,降级改由 content.js 发起 fetch
+    topics = await fetchToday({ groupId, isBeforeToday });
   } catch (e) { return { ok: false, error: '拉取星球失败(登录态?):' + e.message }; }
 
   const candidates = coarseFilter(topics);
