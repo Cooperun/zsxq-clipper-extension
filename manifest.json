@@ -1,30 +1,15 @@
 {
   "manifest_version": 3,
   "name": "知识星球剪藏",
-  "version": "5.5.0",
-  "description": "在知识星球帖子上直接添加剪藏按钮，一键保存为 Markdown（支持外链正文抓取）",
-  "permissions": ["tabs", "scripting"],
+  "version": "6.0.0",
+  "description": "AI 精选筛选 + 剪藏为 Markdown(支持外链正文抓取、本地落盘)",
+  "permissions": ["tabs", "scripting", "storage", "downloads"],
   "host_permissions": ["*://*.zsxq.com/*"],
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
-  "action": {
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
-  },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "action": { "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" } },
+  "options_page": "options.html",
   "content_scripts": [
-    {
-      "matches": ["*://wx.zsxq.com/*"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
+    { "matches": ["*://wx.zsxq.com/*"], "js": ["content.js"], "run_at": "document_idle" }
   ],
-  "background": {
-    "service_worker": "background.js"
-  }
+  "background": { "service_worker": "background.js", "type": "module" }
 }
