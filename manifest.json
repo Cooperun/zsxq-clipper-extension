@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "知识星球剪藏",
+  "version": "5.5.0",
+  "description": "在知识星球帖子上直接添加剪藏按钮，一键保存为 Markdown（支持外链正文抓取）",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": ["*://*.zsxq.com/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://wx.zsxq.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
