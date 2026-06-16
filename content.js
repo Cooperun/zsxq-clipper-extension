@@ -622,8 +622,25 @@
     });
   }
 
-  // 精选栏 [收]：定位该 topic 的 DOM 节点触发现有剪藏,或直接走 File System Access(见 Task 11/13)
-  async function saveFromCur(topicId, topics) { /* Task 13 接线 */ }
+  // 精选栏 [收]：从评分结果直接落盘（已有完整 text/images，无需重新抓 DOM）
+  async function saveFromCur(topicId, topics) {
+    const t = topics.find(x => String(x.topic_id) === String(topicId));
+    if (!t) return;
+    const md = `# ${t.title}\n\n- **作者**: ${t.author}\n- **AI评分**: ${t.score}\n- **理由**: ${t.reason || ''}\n\n---\n\n${t.text}\n`;
+    const safe = (t.title || 'post').substring(0, 30).replace(/[\\/:*?"<>|\n]/g, '_');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    try {
+      const p = await saveMarkdownLocal(`zsxq_${safe}_${ts}.md`, md);
+      alert('✓ 已保存到 ' + p);
+    } catch (e) {
+      if (e.message === '未授权目录') {
+        try { await authorizeDir(); alert('已授权目录,请重新点 [收]'); }
+        catch (e2) { alert('授权失败: ' + e2.message); }
+      } else {
+        alert('保存失败: ' + e.message);
+      }
+    }
+  }
 
   injectSidebar();
 
