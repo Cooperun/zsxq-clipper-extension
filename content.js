@@ -541,5 +541,55 @@
   document.querySelectorAll('app-topic').forEach(addClipButton);
   observer.observe(document.body, { childList: true, subtree: true });
 
+  // ===== 精选栏 =====
+  function getGroupId() {
+    const m = location.pathname.match(/group[s]?\/(\d+)/) || location.href.match(/group[s]?\/(\d+)/);
+    return m ? m[1] : null;
+  }
+
+  function escHtml(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+  function injectSidebar() {
+    if (document.getElementById('zsxq-curation-bar')) return;
+    const bar = document.createElement('div');
+    bar.id = 'zsxq-curation-bar';
+    bar.style.cssText = 'position:fixed;right:0;top:60px;width:320px;height:80vh;overflow-y:auto;background:#1a1a2e;color:#eee;z-index:99999;border-left:2px solid #4ecca3;padding:10px;font-size:13px;box-shadow:-2px 0 8px rgba(0,0,0,.3)';
+    bar.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <b>⭐ AI 精选</b><button id="zsxq-scan-btn" style="background:#4ecca3;border:0;border-radius:4px;padding:3px 8px;cursor:pointer">🔍 扫描今日</button>
+      </div>
+      <div id="zsxq-curation-list"><div style="color:#8b8baf">点「扫描今日」开始</div></div>`;
+    document.body.appendChild(bar);
+    document.getElementById('zsxq-scan-btn').addEventListener('click', scanToday);
+  }
+
+  async function scanToday() {
+    const groupId = getGroupId();
+    const list = document.getElementById('zsxq-curation-list');
+    if (!list) return;
+    if (!groupId) { list.innerHTML = '<div style="color:#ff6b6b">未识别到星球 ID</div>'; return; }
+    list.innerHTML = '<div style="color:#ffc93c">⏳ 扫描评分中...</div>';
+    const todayStr = new Date().toDateString();
+    chrome.runtime.sendMessage({ type: 'scanToday', groupId, todayStr }, resp => {
+      if (chrome.runtime.lastError) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(chrome.runtime.lastError.message) + '</div>'; return; }
+      if (!resp || !resp.ok) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(resp?.error || '失败') + '</div>'; return; }
+      if (!resp.topics || !resp.topics.length) { list.innerHTML = '<div>' + escHtml(resp.note || '今日无内容') + '</div>'; return; }
+      list.innerHTML = resp.topics.map(t => `
+        <div style="background:#222244;border-radius:6px;padding:8px;margin-bottom:6px">
+          <div>⭐${escHtml(t.score)} <b>${escHtml(t.title)}</b></div>
+          <div style="color:#8b8baf;font-size:11px">${escHtml(t.author)} · ❤️${escHtml(t.likes)} · 💬${escHtml(t.comments)}</div>
+          <div style="color:#aaa;font-size:11px;margin:3px 0">${escHtml(t.reason || '')}</div>
+          <button class="zsxq-cur-save" data-id="${escHtml(t.topic_id)}" style="font-size:11px;padding:2px 6px">📋 收</button>
+        </div>`).join('');
+      list.querySelectorAll('.zsxq-cur-save').forEach(b =>
+        b.addEventListener('click', () => saveFromCur(b.dataset.id, resp.topics)));
+    });
+  }
+
+  // 精选栏 [收]：定位该 topic 的 DOM 节点触发现有剪藏,或直接走 File System Access(见 Task 11/13)
+  async function saveFromCur(topicId, topics) { /* Task 13 接线 */ }
+
+  injectSidebar();
+
   console.log('[剪藏] v5.6 已加载（图片本地化），找到', document.querySelectorAll('app-topic').length, '个帖子');
 })();
