@@ -62,16 +62,17 @@ async function fetchArticleViaTab(url) {
 }
 
 // 新增:scanToday 编排
-async function handleScanToday({ groupId, todayStr }) {
+async function handleScanToday({ groupId, todayStr, sinceDays = 1 }) {
   const { apiKey, focus, model, provider, endpoint } = await chrome.storage.local.get(['apiKey', 'focus', 'model', 'provider', 'endpoint']);
-  if (!apiKey) return { ok: false, error: '未设置 API key,请到扩展设置页填写' };
+  if (!apiKey) return { ok: false, error: '未设置 API key,请点 ⚙️ 填写' };
 
-  const isBeforeToday = (ts) => new Date(ts).toDateString() !== new Date().toDateString();
+  const sinceTs = Date.now() - sinceDays * 86400000;
+  const isBeforeRange = (ts) => new Date(ts).getTime() < sinceTs; // 早于时间范围 → 停止翻页
   let topics;
   try {
     // 认证靠 httpOnly cookie(credentials:'include',见 lib/zsxq-api.mjs + docs/api-reference.md)
     // background SW 对 host-permission 域 fetch 会带 cookie;若实测 401,降级改由 content.js 发起 fetch
-    topics = await fetchToday({ groupId, isBeforeToday });
+    topics = await fetchToday({ groupId, isBeforeToday: isBeforeRange });
   } catch (e) { return { ok: false, error: '拉取星球失败(登录态?):' + e.message }; }
 
   const candidates = coarseFilter(topics);

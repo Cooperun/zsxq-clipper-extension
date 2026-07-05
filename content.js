@@ -702,6 +702,12 @@
         <textarea id="zsxq-set-focus" rows="2" placeholder="关注领域(评分参考)" style="width:100%;margin-bottom:4px;box-sizing:border-box;padding:4px;background:#222;color:#eee;border:1px solid #444;border-radius:3px"></textarea>
         <button id="zsxq-set-save" style="background:#4ecca3;border:0;border-radius:4px;padding:4px 14px;cursor:pointer;color:#111">保存</button><span id="zsxq-set-msg" style="color:#4ecca3;margin-left:8px"></span>
       </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;color:#8b8baf">
+        时间范围:
+        <select id="zsxq-range" style="background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;flex:1">
+          <option value="1">今日</option><option value="3">近 3 天</option><option value="7" selected>近 7 天</option><option value="30">近 30 天</option>
+        </select>
+      </div>
       <div id="zsxq-curation-list"><div style="color:#8b8baf">点「🔍 扫描」开始 · 点 ⚙️ 填 API key</div></div>`;
     document.body.appendChild(bar);
     document.getElementById('zsxq-scan-btn').addEventListener('click', scanToday);
@@ -725,19 +731,25 @@
     const list = document.getElementById('zsxq-curation-list');
     if (!list) return;
     if (!groupId) { list.innerHTML = '<div style="color:#ff6b6b">未识别到星球 ID</div>'; return; }
-    list.innerHTML = '<div style="color:#ffc93c">⏳ 扫描评分中...</div>';
+    const rangeSel = document.getElementById('zsxq-range');
+    const sinceDays = parseInt(rangeSel?.value || '7', 10);
+    list.innerHTML = `<div style="color:#ffc93c">⏳ 扫描近 ${sinceDays} 天,评分中(粗筛后逐条 AI 评,稍候)...</div>`;
     const todayStr = new Date().toDateString();
-    chrome.runtime.sendMessage({ type: 'scanToday', groupId, todayStr }, resp => {
+    chrome.runtime.sendMessage({ type: 'scanToday', groupId, todayStr, sinceDays }, resp => {
       if (chrome.runtime.lastError) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(chrome.runtime.lastError.message) + '</div>'; return; }
       if (!resp || !resp.ok) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(resp?.error || '失败') + '</div>'; return; }
-      if (!resp.topics || !resp.topics.length) { list.innerHTML = '<div>' + escHtml(resp.note || '今日无内容') + '</div>'; return; }
-      list.innerHTML = resp.topics.map(t => `
+      if (!resp.topics || !resp.topics.length) { list.innerHTML = '<div>' + escHtml(resp.note || '该时间段无内容') + '</div>'; return; }
+      list.innerHTML = resp.topics.map(t => {
+        const dt = t.create_time ? new Date(t.create_time).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
+        return `
         <div style="background:#222244;border-radius:6px;padding:8px;margin-bottom:6px">
           <div>⭐${escHtml(t.score)} <b>${escHtml(t.title)}</b></div>
-          <div style="color:#8b8baf;font-size:11px">${escHtml(t.author)} · ❤️${escHtml(t.likes)} · 💬${escHtml(t.comments)}</div>
+          <div style="color:#8b8baf;font-size:11px">${escHtml(dt)} · ${escHtml(t.author)} · ❤️${escHtml(t.likes)} · 💬${escHtml(t.comments)}</div>
           <div style="color:#aaa;font-size:11px;margin:3px 0">${escHtml(t.reason || '')}</div>
-          <button class="zsxq-cur-save" data-id="${escHtml(t.topic_id)}" style="font-size:11px;padding:2px 6px">📋 收</button>
-        </div>`).join('');
+          <button class="zsxq-cur-save" data-id="${escHtml(t.topic_id)}" style="font-size:11px;padding:2px 8px;background:#4ecca3;border:0;border-radius:3px;cursor:pointer;color:#111">📋 收</button>
+          <a href="https://wx.zsxq.com/topic/${escHtml(t.topic_id)}" target="_blank" rel="noopener" style="font-size:11px;margin-left:6px;color:#7aa2ff;text-decoration:none">🔗 原文</a>
+        </div>`;
+      }).join('');
       list.querySelectorAll('.zsxq-cur-save').forEach(b =>
         b.addEventListener('click', () => saveFromCur(b.dataset.id, resp.topics)));
     });
