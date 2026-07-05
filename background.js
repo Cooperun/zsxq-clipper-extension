@@ -63,7 +63,7 @@ async function fetchArticleViaTab(url) {
 
 // 新增:scanToday 编排
 async function handleScanToday({ groupId, todayStr }) {
-  const { apiKey, focus, model } = await chrome.storage.local.get(['apiKey', 'focus', 'model']);
+  const { apiKey, focus, model, provider, endpoint } = await chrome.storage.local.get(['apiKey', 'focus', 'model', 'provider', 'endpoint']);
   if (!apiKey) return { ok: false, error: '未设置 API key,请到扩展设置页填写' };
 
   const isBeforeToday = (ts) => new Date(ts).toDateString() !== new Date().toDateString();
@@ -85,7 +85,7 @@ async function handleScanToday({ groupId, todayStr }) {
     const hit = await cache.get(ck, todayStr);
     if (hit) { scored.push({ ...t, ...hit }); continue; }
     try {
-      const s = await scoreOne({ text: t.text, focus }, { apiKey, model: model || 'glm-4-flash' });
+      const s = await scoreOne({ text: t.text, focus }, { apiKey, model, provider, endpoint });
       await cache.set(ck, s, todayStr);
       scored.push({ ...t, ...s });
     } catch (e) {

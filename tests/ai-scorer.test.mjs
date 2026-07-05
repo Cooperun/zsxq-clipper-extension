@@ -33,3 +33,25 @@ test('scoreOne: 注入 mock fetch,返回解析结果', async () => {
   assert.equal(r.score, 9);
   assert.deepEqual(r.tags, ['RAG']);
 });
+
+test('scoreOne: 默认 provider=zhipu 走智谱 endpoint', async () => {
+  const calls = [];
+  const fakeFetch = async (url) => { calls.push(url); return { json: async () => ({ choices: [{ message: { content: '{"score":8,"reason":"x","tags":[]}' } }] }) }; };
+  await scoreOne({ text: 'x' }, { fetch: fakeFetch, apiKey: 'k' });
+  assert.equal(calls[0], 'https://open.bigmodel.cn/api/paas/v4/chat/completions');
+});
+
+test('scoreOne: provider=deepseek 走 deepseek endpoint + 默认 model', async () => {
+  const calls = []; const bodies = [];
+  const fakeFetch = async (url, opts) => { calls.push(url); bodies.push(JSON.parse(opts.body)); return { json: async () => ({ choices: [{ message: { content: '{"score":8,"reason":"x","tags":[]}' } }] }) }; };
+  await scoreOne({ text: 'x' }, { fetch: fakeFetch, apiKey: 'k', provider: 'deepseek' });
+  assert.equal(calls[0], 'https://api.deepseek.com/v1/chat/completions');
+  assert.equal(bodies[0].model, 'deepseek-chat');
+});
+
+test('scoreOne: 自定义 endpoint 覆盖 provider', async () => {
+  const calls = [];
+  const fakeFetch = async (url) => { calls.push(url); return { json: async () => ({ choices: [{ message: { content: '{"score":8,"reason":"x","tags":[]}' } }] }) }; };
+  await scoreOne({ text: 'x' }, { fetch: fakeFetch, apiKey: 'k', provider: 'custom', endpoint: 'https://my.api/v1/chat' });
+  assert.equal(calls[0], 'https://my.api/v1/chat');
+});
