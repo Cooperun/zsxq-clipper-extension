@@ -585,18 +585,90 @@
 
   function escHtml(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
+  const BAR_KEY = 'zsxq-cur-bar-state';
+  function loadBarState() { try { return JSON.parse(localStorage.getItem(BAR_KEY)) || {}; } catch (_) { return {}; } }
+  function saveBarState(s) { localStorage.setItem(BAR_KEY, JSON.stringify({ ...loadBarState(), ...s })); }
+
+  function setFold(bar, fold) {
+    const title = bar.querySelector('#zsxq-cur-title');
+    const actions = bar.querySelector('#zsxq-cur-actions');
+    const unfold = bar.querySelector('#zsxq-unfold');
+    const list = bar.querySelector('#zsxq-curation-list');
+    if (fold) {
+      title.textContent = '⭐';
+      actions.style.display = 'none';
+      unfold.style.display = '';
+      list.style.display = 'none';
+      bar.style.width = 'auto';
+      bar.style.maxHeight = 'none';
+      bar.style.padding = '4px 10px';
+      bar.setAttribute('data-folded', '1');
+      saveBarState({ folded: true });
+    } else {
+      title.textContent = '⭐ AI 精选';
+      actions.style.display = '';
+      unfold.style.display = 'none';
+      list.style.display = '';
+      bar.style.width = '320px';
+      bar.style.maxHeight = '80vh';
+      bar.style.padding = '10px';
+      bar.setAttribute('data-folded', '0');
+      saveBarState({ folded: false });
+    }
+  }
+
+  function makeDraggable(bar, handle) {
+    let dragging = false, ox = 0, oy = 0;
+    handle.addEventListener('mousedown', (e) => {
+      if (e.target.closest('button')) return; // 点按钮不拖
+      dragging = true;
+      const rect = bar.getBoundingClientRect();
+      ox = e.clientX - rect.left;
+      oy = e.clientY - rect.top;
+      bar.style.right = 'auto';
+      bar.style.left = rect.left + 'px';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const nl = Math.max(0, Math.min(window.innerWidth - 60, e.clientX - ox));
+      const nt = Math.max(0, Math.min(window.innerHeight - 40, e.clientY - oy));
+      bar.style.left = nl + 'px';
+      bar.style.top = nt + 'px';
+    });
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      const rect = bar.getBoundingClientRect();
+      saveBarState({ left: Math.round(rect.left), top: Math.round(rect.top) });
+    });
+  }
+
   function injectSidebar() {
     if (document.getElementById('zsxq-curation-bar')) return;
+    const state = loadBarState();
     const bar = document.createElement('div');
     bar.id = 'zsxq-curation-bar';
-    bar.style.cssText = 'position:fixed;right:0;top:60px;width:320px;height:80vh;overflow-y:auto;background:#1a1a2e;color:#eee;z-index:99999;border-left:2px solid #4ecca3;padding:10px;font-size:13px;box-shadow:-2px 0 8px rgba(0,0,0,.3)';
+    const posCss = state.left != null ? `left:${state.left}px;` : 'right:0;';
+    bar.style.cssText = `position:fixed;${posCss}top:${state.top != null ? state.top : 60}px;width:320px;max-height:80vh;overflow-y:auto;background:#1a1a2e;color:#eee;z-index:99999;border:2px solid #4ecca3;border-radius:8px;padding:10px;font-size:13px;box-shadow:-2px 0 12px rgba(0,0,0,.4)`;
     bar.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <b>⭐ AI 精选</b><button id="zsxq-scan-btn" style="background:#4ecca3;border:0;border-radius:4px;padding:3px 8px;cursor:pointer">🔍 扫描今日</button>
+      <div id="zsxq-cur-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:move;user-select:none">
+        <b id="zsxq-cur-title">⭐ AI 精选</b>
+        <span id="zsxq-cur-actions">
+          <button id="zsxq-settings-btn" title="设置(API key 等)" style="background:#333;border:0;border-radius:4px;padding:3px 7px;cursor:pointer;color:#eee;margin-right:4px">⚙️</button>
+          <button id="zsxq-fold-btn" title="折叠成球" style="background:#333;border:0;border-radius:4px;padding:3px 7px;cursor:pointer;color:#eee;margin-right:4px">—</button>
+          <button id="zsxq-scan-btn" style="background:#4ecca3;border:0;border-radius:4px;padding:3px 10px;cursor:pointer;color:#111">🔍 扫描</button>
+        </span>
+        <button id="zsxq-unfold" title="展开" style="display:none;background:#4ecca3;border:0;border-radius:4px;padding:3px 10px;cursor:pointer;color:#111;margin-left:8px">⤢</button>
       </div>
-      <div id="zsxq-curation-list"><div style="color:#8b8baf">点「扫描今日」开始</div></div>`;
+      <div id="zsxq-curation-list"><div style="color:#8b8baf">点「🔍 扫描」开始 · 点 ⚙️ 填 API key</div></div>`;
     document.body.appendChild(bar);
     document.getElementById('zsxq-scan-btn').addEventListener('click', scanToday);
+    document.getElementById('zsxq-settings-btn').addEventListener('click', () => chrome.runtime.openOptionsPage());
+    document.getElementById('zsxq-fold-btn').addEventListener('click', () => setFold(bar, true));
+    document.getElementById('zsxq-unfold').addEventListener('click', () => setFold(bar, false));
+    makeDraggable(bar, document.getElementById('zsxq-cur-head'));
+    if (state.folded) setFold(bar, true);
   }
 
   async function scanToday() {
