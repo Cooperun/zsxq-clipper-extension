@@ -739,19 +739,26 @@
       if (chrome.runtime.lastError) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(chrome.runtime.lastError.message) + '</div>'; return; }
       if (!resp || !resp.ok) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(resp?.error || '失败') + '</div>'; return; }
       if (!resp.topics || !resp.topics.length) { list.innerHTML = '<div>' + escHtml(resp.note || '该时间段无内容') + '</div>'; return; }
-      list.innerHTML = resp.topics.map(t => {
+      list.innerHTML = resp.topics.map((t, i) => {
         const dt = t.create_time ? new Date(t.create_time).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
+        const imgs = (t.images && t.images.length) ? '<div style="margin-top:4px">' + t.images.map(u => `<a href="${escHtml(u)}" target="_blank" rel="noopener" style="color:#7aa2ff;font-size:11px;margin-right:6px">🖼 图</a>`).join('') + '</div>' : '';
         return `
         <div style="background:#222244;border-radius:6px;padding:8px;margin-bottom:6px">
           <div>⭐${escHtml(t.score)} <b>${escHtml(t.title)}</b></div>
           <div style="color:#8b8baf;font-size:11px">${escHtml(dt)} · ${escHtml(t.author)} · ❤️${escHtml(t.likes)} · 💬${escHtml(t.comments)}</div>
           <div style="color:#aaa;font-size:11px;margin:3px 0">${escHtml(t.reason || '')}</div>
           <button class="zsxq-cur-save" data-id="${escHtml(t.topic_id)}" style="font-size:11px;padding:2px 8px;background:#4ecca3;border:0;border-radius:3px;cursor:pointer;color:#111">📋 收</button>
-          <a href="https://wx.zsxq.com/topic/${escHtml(t.topic_id)}" target="_blank" rel="noopener" style="font-size:11px;margin-left:6px;color:#7aa2ff;text-decoration:none">🔗 原文</a>
+          <button class="zsxq-cur-full-btn" data-i="${i}" style="font-size:11px;padding:2px 8px;background:#333;border:0;border-radius:3px;cursor:pointer;color:#eee;margin-left:6px">📄 全文</button>
+          <div class="zsxq-cur-full" data-i="${i}" style="display:none;margin-top:6px;padding:6px;background:#11112a;border-radius:4px;font-size:12px;max-height:240px;overflow-y:auto;white-space:pre-wrap;color:#ccc;line-height:1.5">${escHtml(t.text)}${imgs}</div>
         </div>`;
       }).join('');
       list.querySelectorAll('.zsxq-cur-save').forEach(b =>
         b.addEventListener('click', () => saveFromCur(b.dataset.id, resp.topics)));
+      list.querySelectorAll('.zsxq-cur-full-btn').forEach(b =>
+        b.addEventListener('click', () => {
+          const full = list.querySelector(`.zsxq-cur-full[data-i="${b.dataset.i}"]`);
+          if (full) full.style.display = full.style.display === 'none' ? 'block' : 'none';
+        }));
     });
   }
 
