@@ -589,6 +589,36 @@
   function loadBarState() { try { return JSON.parse(localStorage.getItem(BAR_KEY)) || {}; } catch (_) { return {}; } }
   function saveBarState(s) { localStorage.setItem(BAR_KEY, JSON.stringify({ ...loadBarState(), ...s })); }
 
+  function toggleEndpointField() {
+    const v = document.getElementById('zsxq-set-provider')?.value;
+    const ep = document.getElementById('zsxq-set-endpoint');
+    if (ep) ep.style.display = v === 'custom' ? 'block' : 'none';
+  }
+  function loadSettings() {
+    chrome.storage.local.get(['apiKey', 'model', 'focus', 'provider', 'endpoint'], r => {
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+      set('zsxq-set-provider', r.provider || 'zhipu');
+      set('zsxq-set-key', r.apiKey);
+      set('zsxq-set-endpoint', r.endpoint);
+      set('zsxq-set-model', r.model);
+      set('zsxq-set-focus', r.focus);
+      toggleEndpointField();
+    });
+  }
+  function saveSettings() {
+    const v = id => document.getElementById(id)?.value?.trim() || '';
+    chrome.storage.local.set({
+      provider: v('zsxq-set-provider'),
+      apiKey: v('zsxq-set-key'),
+      endpoint: v('zsxq-set-endpoint'),
+      model: v('zsxq-set-model'),
+      focus: v('zsxq-set-focus')
+    }, () => {
+      const msg = document.getElementById('zsxq-set-msg');
+      if (msg) { msg.textContent = '✓ 已保存'; setTimeout(() => msg.textContent = '', 1500); }
+    });
+  }
+
   function setFold(bar, fold) {
     const title = bar.querySelector('#zsxq-cur-title');
     const actions = bar.querySelector('#zsxq-cur-actions');
@@ -599,6 +629,8 @@
       actions.style.display = 'none';
       unfold.style.display = '';
       list.style.display = 'none';
+      const panel = bar.querySelector('#zsxq-settings-panel');
+      if (panel) panel.style.display = 'none';
       bar.style.width = 'auto';
       bar.style.maxHeight = 'none';
       bar.style.padding = '4px 10px';
@@ -661,16 +693,27 @@
         </span>
         <button id="zsxq-unfold" title="展开" style="display:none;background:#4ecca3;border:0;border-radius:4px;padding:3px 10px;cursor:pointer;color:#111;margin-left:8px">⤢</button>
       </div>
+      <div id="zsxq-settings-panel" style="display:none;background:#11112a;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px">
+        <div style="font-weight:bold;margin-bottom:6px">⚙️ 设置</div>
+        <select id="zsxq-set-provider" style="width:100%;margin-bottom:4px;box-sizing:border-box;padding:3px;background:#222;color:#eee;border:1px solid #444;border-radius:3px"><option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option><option value="custom">自定义</option></select>
+        <input id="zsxq-set-key" type="password" placeholder="API Key" style="width:100%;margin-bottom:4px;box-sizing:border-box;padding:4px;background:#222;color:#eee;border:1px solid #444;border-radius:3px">
+        <input id="zsxq-set-endpoint" placeholder="Endpoint(自定义时填)" style="display:none;width:100%;margin-bottom:4px;box-sizing:border-box;padding:4px;background:#222;color:#eee;border:1px solid #444;border-radius:3px">
+        <input id="zsxq-set-model" placeholder="模型(留空用默认)" style="width:100%;margin-bottom:4px;box-sizing:border-box;padding:4px;background:#222;color:#eee;border:1px solid #444;border-radius:3px">
+        <textarea id="zsxq-set-focus" rows="2" placeholder="关注领域(评分参考)" style="width:100%;margin-bottom:4px;box-sizing:border-box;padding:4px;background:#222;color:#eee;border:1px solid #444;border-radius:3px"></textarea>
+        <button id="zsxq-set-save" style="background:#4ecca3;border:0;border-radius:4px;padding:4px 14px;cursor:pointer;color:#111">保存</button><span id="zsxq-set-msg" style="color:#4ecca3;margin-left:8px"></span>
+      </div>
       <div id="zsxq-curation-list"><div style="color:#8b8baf">点「🔍 扫描」开始 · 点 ⚙️ 填 API key</div></div>`;
     document.body.appendChild(bar);
     document.getElementById('zsxq-scan-btn').addEventListener('click', scanToday);
     document.getElementById('zsxq-settings-btn').addEventListener('click', (e) => {
       e.stopPropagation();
-      const b = e.currentTarget;
-      b.textContent = '⋯'; b.style.background = '#4ecca3'; // 视觉反馈:确认点击生效
-      chrome.runtime.sendMessage({ type: 'openOptions' });
-      setTimeout(() => { b.textContent = '⚙️'; b.style.background = '#333'; }, 700);
+      const panel = document.getElementById('zsxq-settings-panel');
+      const willOpen = panel.style.display === 'none';
+      panel.style.display = willOpen ? 'block' : 'none';
+      if (willOpen) loadSettings();
     });
+    document.getElementById('zsxq-set-provider').addEventListener('change', toggleEndpointField);
+    document.getElementById('zsxq-set-save').addEventListener('click', saveSettings);
     document.getElementById('zsxq-fold-btn').addEventListener('click', () => setFold(bar, true));
     document.getElementById('zsxq-unfold').addEventListener('click', () => setFold(bar, false));
     makeDraggable(bar, document.getElementById('zsxq-cur-head'));
