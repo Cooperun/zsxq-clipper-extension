@@ -664,7 +664,13 @@
       <div id="zsxq-curation-list"><div style="color:#8b8baf">点「🔍 扫描」开始 · 点 ⚙️ 填 API key</div></div>`;
     document.body.appendChild(bar);
     document.getElementById('zsxq-scan-btn').addEventListener('click', scanToday);
-    document.getElementById('zsxq-settings-btn').addEventListener('click', () => chrome.runtime.openOptionsPage());
+    document.getElementById('zsxq-settings-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const b = e.currentTarget;
+      b.textContent = '⋯'; b.style.background = '#4ecca3'; // 视觉反馈:确认点击生效
+      chrome.runtime.sendMessage({ type: 'openOptions' });
+      setTimeout(() => { b.textContent = '⚙️'; b.style.background = '#333'; }, 700);
+    });
     document.getElementById('zsxq-fold-btn').addEventListener('click', () => setFold(bar, true));
     document.getElementById('zsxq-unfold').addEventListener('click', () => setFold(bar, false));
     makeDraggable(bar, document.getElementById('zsxq-cur-head'));

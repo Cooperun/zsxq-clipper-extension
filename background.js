@@ -122,4 +122,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleScanToday(msg).then(sendResponse).catch(e => sendResponse({ ok: false, error: e.message }));
     return true;
   }
+  if (msg.type === 'openOptions') {
+    // content script 调 openOptionsPage 不可靠,由 background 代理
+    chrome.runtime.openOptionsPage().catch(() => {});
+    return false;
+  }
 });
