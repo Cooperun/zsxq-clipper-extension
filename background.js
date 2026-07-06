@@ -2,7 +2,8 @@
 import { coarseFilter } from './lib/filter.mjs';
 import { scoreOne } from './lib/ai-scorer.mjs';
 import { makeCache, keyFor } from './lib/cache.mjs';
-import { fetchToday } from './lib/zsxq-api.mjs';
+import { fetchToday, fetchComments } from './lib/zsxq-api.mjs';
+import { computeFreshness, computeNovelty, computeTotalScore } from './lib/scorer.mjs';
 
 const SERVER = 'http://127.0.0.1:8765/clip'; // 保留作可选 fallback
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -62,21 +63,19 @@ async function fetchArticleViaTab(url) {
 }
 
 // 新增:scanToday 编排
-async function handleScanToday({ groupId, todayStr, sinceDays = 1 }) {
+async function handleScanToday({ groupId, todayStr, sinceDays = 1, history = [] }) {
   const { apiKey, focus, model, provider, endpoint } = await chrome.storage.local.get(['apiKey', 'focus', 'model', 'provider', 'endpoint']);
   if (!apiKey) return { ok: false, error: '未设置 API key,请点 ⚙️ 填写' };
 
   const sinceTs = Date.now() - sinceDays * 86400000;
-  const isBeforeRange = (ts) => new Date(ts).getTime() < sinceTs; // 早于时间范围 → 停止翻页
+  const isBeforeRange = (ts) => new Date(ts).getTime() < sinceTs;
   let topics;
   try {
-    // 认证靠 httpOnly cookie(credentials:'include',见 lib/zsxq-api.mjs + docs/api-reference.md)
-    // background SW 对 host-permission 域 fetch 会带 cookie;若实测 401,降级改由 content.js 发起 fetch
     topics = await fetchToday({ groupId, isBeforeToday: isBeforeRange });
   } catch (e) { return { ok: false, error: '拉取星球失败(登录态?):' + e.message }; }
 
   const candidates = coarseFilter(topics);
-  if (!candidates.length) return { ok: true, topics: [], note: '今日无值得精筛的内容' };
+  if (!candidates.length) return { ok: true, topics: [], note: '该时间段无值得精筛的内容' };
 
   const scored = [];
   const limit = 50;
@@ -84,14 +83,36 @@ async function handleScanToday({ groupId, todayStr, sinceDays = 1 }) {
     const t = candidates[i];
     const ck = keyFor(t);
     const hit = await cache.get(ck, todayStr);
-    if (hit) { scored.push({ ...t, ...hit }); continue; }
-    try {
-      const s = await scoreOne({ text: t.text, focus }, { apiKey, model, provider, endpoint });
-      await cache.set(ck, s, todayStr);
-      scored.push({ ...t, ...s });
-    } catch (e) {
-      scored.push({ ...t, score: 0, reason: 'AI 评分失败', tags: [] }); // 降级
+    let utility;
+    if (hit && typeof hit.utility === 'number') {
+      // 命中缓存:utility 复用,跳过评论拉取(评论只为 AI 评分服务,不缓存)
+      utility = hit;
+    } else {
+      // 未命中:拉评论 → 拼 textForAI → AI 评 utility
+      let comments = [];
+      try { comments = await fetchComments({ topicId: t.topic_id }); }
+      catch (e) { /* 降级:无评论 */ }
+      const topComments = comments.slice(0, 3)
+        .map(c => `- ${c.text.replace(/\n/g, ' ').slice(0, 200)}(赞${c.likes})`).join('\n');
+      const textForAI = topComments ? `${t.text}\n\n精选评论:\n${topComments}` : t.text;
+      try {
+        const s = await scoreOne({ text: textForAI, focus }, { apiKey, model, provider, endpoint });
+        utility = { utility: s.score, reason: s.reason, tags: s.tags };
+        await cache.set(ck, utility, todayStr);
+      } catch (e) {
+        utility = { utility: 0, reason: 'AI 评分失败', tags: [] };
+      }
     }
+    // freshness / novelty 本地算(每次现算,不缓存 —— 随时间/历史变化)
+    const freshness = computeFreshness(t.create_time);
+    const novelty = computeNovelty(t, history);
+    const total = computeTotalScore({ freshness, novelty, utility: utility.utility });
+    scored.push({
+      ...t, ...utility,
+      score: total,
+      freshness: Math.round(freshness * 10) / 10,
+      novelty: Math.round(novelty * 10) / 10
+    });
   }
   scored.sort((a, b) => (b.score || 0) - (a.score || 0));
   return { ok: true, topics: scored };
