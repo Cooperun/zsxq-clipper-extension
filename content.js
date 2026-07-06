@@ -611,6 +611,32 @@
 
   function escHtml(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
+  // 轻量 Markdown → HTML(zsxq 正文常见格式)。先 escHtml 防 XSS,再加受控标签。
+  function mdToHtml(md) {
+    let h = escHtml(md || '');
+    // 代码块(多行)
+    h = h.replace(/```([\s\S]*?)```/g, (m, c) => `<pre style="background:#000;color:#9fe09f;padding:8px;border-radius:4px;overflow-x:auto;font-size:11px;margin:6px 0">${c.replace(/\n/g,'<br>')}</pre>`);
+    // 标题
+    h = h.replace(/^### ?(.*)$/gm, '<h4 style="margin:8px 0 4px">$1</h4>')
+         .replace(/^## ?(.*)$/gm, '<h3 style="margin:8px 0 4px">$1</h3>')
+         .replace(/^# ?(.*)$/gm, '<h2 style="margin:10px 0 4px">$1</h2>');
+    // 加粗 / 行内代码
+    h = h.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+         .replace(/`([^`]+)`/g, '<code style="background:#000;padding:1px 4px;border-radius:3px;font-size:11px">$1</code>');
+    // 图片
+    h = h.replace(/!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g, '<img src="$1" style="max-width:100%;border-radius:6px;margin:6px 0;display:block">');
+    // 链接
+    h = h.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:#7aa2ff">$1</a>');
+    // 引用(escHtml 把 > 转成 &gt;)
+    h = h.replace(/^&gt; ?(.*)$/gm, '<blockquote style="border-left:3px solid #4ecca3;padding-left:8px;color:#aaa;margin:6px 0">$1</blockquote>');
+    // 无序列表
+    h = h.replace(/(?:^|\n)[\-\*] (.*)/g, (m, t) => `\n<li style="margin-left:16px;list-style:disc">${t}</li>`);
+    h = h.replace(/(<li[^>]*>[\s\S]*?<\/li>)/g, '<ul style="margin:4px 0;padding-left:8px">$1</ul>');
+    // 换行
+    h = h.replace(/\n/g, '<br>');
+    return h;
+  }
+
   const BAR_KEY = 'zsxq-cur-bar-state';
   function loadBarState() { try { return JSON.parse(localStorage.getItem(BAR_KEY)) || {}; } catch (_) { return {}; } }
   function saveBarState(s) { localStorage.setItem(BAR_KEY, JSON.stringify({ ...loadBarState(), ...s })); }
@@ -752,6 +778,70 @@
     if (state.folded) setFold(bar, true);
   }
 
+  let lastCurTopics = null; // 闭包级:closeReader 重建列表时复用,避免返回后空栏
+
+  // 渲染精选卡片列表(scanToday 成功 + closeReader 重建 都调它,DRY)
+  function renderCuration(topics) {
+    lastCurTopics = topics;
+    const list = document.getElementById('zsxq-curation-list');
+    if (!list) return;
+    if (!topics || !topics.length) { list.innerHTML = '<div>该时间段无内容</div>'; return; }
+    list.innerHTML = topics.map((t, i) => {
+      const dt = t.create_time ? new Date(t.create_time).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
+      const imgs = (t.images && t.images.length) ? '<div style="margin-top:4px">' + t.images.map(u => `<a href="${escHtml(u)}" target="_blank" rel="noopener" style="color:#7aa2ff;font-size:11px;margin-right:6px">🖼 图</a>`).join('') + '</div>' : '';
+      return `
+        <div style="background:#222244;border-radius:6px;padding:8px;margin-bottom:6px">
+          <div>⭐${escHtml(t.score)} <b>${escHtml(t.title)}</b></div>
+          <div style="color:#8b8baf;font-size:11px">${escHtml(dt)} · ${escHtml(t.author)} · ❤️${escHtml(t.likes)} · 💬${escHtml(t.comments)}</div>
+          <div style="color:#aaa;font-size:11px;margin:3px 0">${escHtml(t.reason || '')}</div>
+          <div style="color:#9a9aff;font-size:10px;margin:2px 0">F${escHtml(t.freshness)} · N${escHtml(t.novelty)} · U${escHtml(t.utility)}</div>
+          <button class="zsxq-cur-save" data-id="${escHtml(t.topic_id)}" style="font-size:11px;padding:2px 8px;background:#4ecca3;border:0;border-radius:3px;cursor:pointer;color:#111">📋 收</button>
+          <button class="zsxq-cur-full-btn" data-i="${i}" style="font-size:11px;padding:2px 8px;background:#333;border:0;border-radius:3px;cursor:pointer;color:#eee;margin-left:6px">📄 全文</button>
+        </div>`;
+    }).join('');
+    list.querySelectorAll('.zsxq-cur-save').forEach(b =>
+      b.addEventListener('click', () => saveFromCur(b.dataset.id, topics)));
+    list.querySelectorAll('.zsxq-cur-full-btn').forEach(b =>
+      b.addEventListener('click', () => expandReader(parseInt(b.dataset.i, 10), topics)));
+  }
+
+  // 全文阅读视图:悬浮框放大 + md 渲染单帖
+  function expandReader(topicIndex, topics) {
+    const t = topics[topicIndex];
+    if (!t) return;
+    const bar = document.getElementById('zsxq-curation-bar');
+    if (!bar) return;
+    localStorage.setItem('zsxq-cur-expand', String(topicIndex));
+    bar.style.width = '640px';
+    bar.style.maxHeight = '90vh';
+    bar.style.height = '90vh';
+    bar.style.left = '50%';
+    bar.style.top = '5vh';
+    bar.style.transform = 'translateX(-50%)';
+    const imgs = (t.images && t.images.length) ? '<div style="margin-top:8px">' + t.images.map(u => `<img src="${escHtml(u)}" style="max-width:100%;border-radius:6px;margin:4px 0;display:block">`).join('') + '</div>' : '';
+    bar.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:move" id="zsxq-reader-head">
+        <b>⭐ ${escHtml(t.score)} · ${escHtml(t.title)}</b>
+        <button id="zsxq-reader-close" style="background:#333;border:0;border-radius:4px;padding:4px 10px;cursor:pointer;color:#eee">← 返回列表</button>
+      </div>
+      <div style="color:#8b8baf;font-size:11px;margin-bottom:8px">${escHtml(t.author)} · ❤️${escHtml(t.likes)} · 💬${escHtml(t.comments)} · F${escHtml(t.freshness)} N${escHtml(t.novelty)} U${escHtml(t.utility)}</div>
+      <div style="overflow-y:auto;max-height:72vh;line-height:1.6;font-size:13px">${mdToHtml(t.text)}${imgs}</div>`;
+    makeDraggable(bar, document.getElementById('zsxq-reader-head'));
+    document.getElementById('zsxq-reader-close').addEventListener('click', () => closeReader());
+  }
+
+  function closeReader() {
+    localStorage.removeItem('zsxq-cur-expand');
+    const bar = document.getElementById('zsxq-curation-bar');
+    if (bar) {
+      // reader 改了 bar.innerHTML,直接 injectSidebar 会因 #zsxq-curation-bar 仍在而 early-return。
+      // 先 remove 旧 bar → injectSidebar 按 loadBarState() 重建空壳(原尺寸/位置)→ renderCuration 恢复卡片
+      bar.remove();
+      injectSidebar();
+      renderCuration(lastCurTopics); // 返回列表时恢复刚才的卡片,不留空栏
+    }
+  }
+
   async function scanToday() {
     const groupId = getGroupId();
     const list = document.getElementById('zsxq-curation-list');
@@ -766,26 +856,7 @@
       if (chrome.runtime.lastError) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(chrome.runtime.lastError.message) + '</div>'; return; }
       if (!resp || !resp.ok) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(resp?.error || '失败') + '</div>'; return; }
       if (!resp.topics || !resp.topics.length) { list.innerHTML = '<div>' + escHtml(resp.note || '该时间段无内容') + '</div>'; return; }
-      list.innerHTML = resp.topics.map((t, i) => {
-        const dt = t.create_time ? new Date(t.create_time).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
-        const imgs = (t.images && t.images.length) ? '<div style="margin-top:4px">' + t.images.map(u => `<a href="${escHtml(u)}" target="_blank" rel="noopener" style="color:#7aa2ff;font-size:11px;margin-right:6px">🖼 图</a>`).join('') + '</div>' : '';
-        return `
-        <div style="background:#222244;border-radius:6px;padding:8px;margin-bottom:6px">
-          <div>⭐${escHtml(t.score)} <b>${escHtml(t.title)}</b></div>
-          <div style="color:#8b8baf;font-size:11px">${escHtml(dt)} · ${escHtml(t.author)} · ❤️${escHtml(t.likes)} · 💬${escHtml(t.comments)}</div>
-          <div style="color:#aaa;font-size:11px;margin:3px 0">${escHtml(t.reason || '')}</div>
-          <button class="zsxq-cur-save" data-id="${escHtml(t.topic_id)}" style="font-size:11px;padding:2px 8px;background:#4ecca3;border:0;border-radius:3px;cursor:pointer;color:#111">📋 收</button>
-          <button class="zsxq-cur-full-btn" data-i="${i}" style="font-size:11px;padding:2px 8px;background:#333;border:0;border-radius:3px;cursor:pointer;color:#eee;margin-left:6px">📄 全文</button>
-          <div class="zsxq-cur-full" data-i="${i}" style="display:none;margin-top:6px;padding:6px;background:#11112a;border-radius:4px;font-size:12px;max-height:240px;overflow-y:auto;white-space:pre-wrap;color:#ccc;line-height:1.5">${escHtml(t.text)}${imgs}</div>
-        </div>`;
-      }).join('');
-      list.querySelectorAll('.zsxq-cur-save').forEach(b =>
-        b.addEventListener('click', () => saveFromCur(b.dataset.id, resp.topics)));
-      list.querySelectorAll('.zsxq-cur-full-btn').forEach(b =>
-        b.addEventListener('click', () => {
-          const full = list.querySelector(`.zsxq-cur-full[data-i="${b.dataset.i}"]`);
-          if (full) full.style.display = full.style.display === 'none' ? 'block' : 'none';
-        }));
+      renderCuration(resp.topics);
     });
   }
 
