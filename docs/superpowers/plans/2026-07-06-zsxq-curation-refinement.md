@@ -154,37 +154,77 @@ export function computeNovelty(topic, history = []) {
 
 ---
 
-## Task 4: fetchComments(TDD)
+## Task 4: fetchComments + 大整数 ID 精度修正(TDD)
 
 **Files:** Modify `lib/zsxq-api.mjs`、`tests/zsxq-api.test.mjs`
 
-> 字段以 Task 1 实测为准。下方用推测默认(`resp_data.comments[].text/owner.name/likes_count`)。
+> 实测要点(见 `docs/api-reference.md` §9/§10):
+> 1. 评论端点是 **`/v2/topics/<topic_id>/comments`**(**不带 group**);`/groups/<gid>/topics/<tid>/comments` 实测 404。
+> 2. `topic_id`/`comment_id`/`user_id` 是 int64 超 2^53,`resp.json()` 会**截断**末位 → 报 15403「主题已经被删除」。必须先正则转字符串再 parse。
+> 3. comment 字段实测确认:`text`、`owner.name`、`likes_count`、`create_time`、`rewards_count`、`replies_count` 等(`mapComment` 推测正确)。
 
-- [ ] **Step 1:** 加失败测试:
+- [ ] **Step 1:** 加 `parseZsxqJson` 工具函数,改 `fetchToday` 用它(修 topic_id 精度,fetchComments 依赖)。在 `lib/zsxq-api.mjs` 顶部 `const BASE = '...';` 之后插入:
 ```javascript
-import { fetchComments, mapComment } from '../lib/zsxq-api.mjs';
+// zsxq 的 topic_id/comment_id/user_id 是 int64、超 2^53,resp.json() 会截断末位。
+// 先把这些 ID 字段加引号转字符串再 parse(正则只匹配 JSON 键值结构,不误伤字符串内容里的字面量)。
+function parseZsxqJson(text) {
+  const safe = text.replace(/"(topic_id|topic_uid|comment_id|user_id)"\s*:\s*(\d+)/g, '"$1":"$2"');
+  return JSON.parse(safe);
+}
+```
+然后把 `fetchToday` 里的 `const data = await resp.json();` 改成:
+```javascript
+    const data = parseZsxqJson(await resp.text());
+```
 
-test('mapComment: 字段映射', () => {
-  const c = mapComment({ text: '好帖', owner: { name: '张三' }, likes_count: 5 });
+- [ ] **Step 2:** 更新现有 `fetchToday` 测试(mock 改用 `text`,并验证大整数 topic_id 精度保留)。把 `tests/zsxq-api.test.mjs` 里那个 `fetchToday` 测试整段替换为:
+```javascript
+test('fetchToday: mock fetch 单页返回(scope=all,credentials include,大整数 id 精度保留)', async () => {
+  const page = { succeeded: true, code: 0, resp_data: { topics: [
+    { topic_id: 45544248881118548, create_time: '2026-06-16T23:54:57.185+0800', likes_count: 5, comments_count: 0, digested: false, talk: { text: 'a'.repeat(120), owner: { name: 'x' } } }
+  ] } };
+  const calls = [];
+  const fakeFetch = async (url, opts) => { calls.push({ url, opts }); return { text: async () => JSON.stringify(page) }; };
+  const topics = await fetchToday({ groupId: 'g1', fetch: fakeFetch, isBeforeToday: () => false });
+  assert.equal(topics.length, 1);
+  assert.equal(topics[0].topic_id, '45544248881118548'); // 关键:大整数末位未被截断
+  assert.ok(calls[0].url.includes('/v2/groups/g1/topics'));
+  assert.ok(calls[0].url.includes('scope=all'));
+  assert.equal(calls[0].opts.credentials, 'include'); // 认证靠 cookie
+});
+```
+> 验证点:`page.topic_id` 写成 number,`JSON.stringify` 输出 `"topic_id":45544248881118548`,`parseZsxqJson` 正则转成 `"topic_id":"45544248881118548"` —— 最终字符串末位精确。若用旧 `resp.json()`,会得到 `'45544248881118540'`(末位被截),断言失败。
+
+- [ ] **Step 3:** 运行 `node --test tests/zsxq-api.test.mjs`,确认 fetchToday 测试通过(精度修正生效)。
+
+- [ ] **Step 4:** 加 `mapComment` + `fetchComments` 失败测试(文件顶部 import 加 `fetchComments, mapComment`):
+```javascript
+import { mapTopic, fetchToday, fetchComments, mapComment } from '../lib/zsxq-api.mjs';
+
+test('mapComment: 字段映射(实测字段)', () => {
+  const c = mapComment({ text: '好帖', owner: { name: '张三', user_id: 123 }, likes_count: 5 });
   assert.deepEqual(c, { text: '好帖', owner: '张三', likes: 5 });
 });
 
-test('fetchComments: mock fetch,验证 URL + cookie + 排序', async () => {
+test('fetchComments: URL 不带 group + cookie + 按 likes 降序', async () => {
   const page = { succeeded: true, resp_data: { comments: [
-    { text: '评论A', owner: { name: 'a' }, likes_count: 2 },
-    { text: '评论B', owner: { name: 'b' }, likes_count: 10 }
+    { comment_id: 1, text: '评论A', owner: { name: 'a' }, likes_count: 2 },
+    { comment_id: 2, text: '评论B', owner: { name: 'b' }, likes_count: 10 }
   ] } };
   const calls = [];
-  const fakeFetch = async (url, opts) => { calls.push({ url, opts }); return { json: async () => page }; };
-  const cs = await fetchComments({ groupId: 'g1', topicId: 't1', fetch: fakeFetch });
-  assert.ok(calls[0].url.includes('/v2/groups/g1/topics/t1/comments'));
+  const fakeFetch = async (url, opts) => { calls.push({ url, opts }); return { text: async () => JSON.stringify(page) } };
+  const cs = await fetchComments({ topicId: '45544248881118548', fetch: fakeFetch });
+  assert.ok(calls[0].url.includes('/v2/topics/45544248881118548/comments'), 'URL 应不带 group: ' + calls[0].url);
+  assert.ok(!calls[0].url.includes('/groups/'), '不应含 /groups/: ' + calls[0].url);
   assert.equal(calls[0].opts.credentials, 'include');
   assert.equal(cs.length, 2);
-  assert.equal(cs[0].likes, 10); // 按 likes 降序
+  assert.equal(cs[0].likes, 10); // 降序
 });
 ```
-- [ ] **Step 2:** 运行确认失败
-- [ ] **Step 3:** 在 `lib/zsxq-api.mjs` 追加(`BASE` 已存在):
+
+- [ ] **Step 5:** 运行确认失败(`fetchComments`/`mapComment` 未导出)。
+
+- [ ] **Step 6:** 在 `lib/zsxq-api.mjs` 末尾追加(`BASE`、`parseZsxqJson` 已存在):
 ```javascript
 export function mapComment(c) {
   return {
@@ -194,19 +234,21 @@ export function mapComment(c) {
   };
 }
 
-// 拉某 topic 的评论,按 likes 降序。认证同 topics(cookie)。
-export async function fetchComments({ groupId, topicId, fetch: f = fetch, count = 10 }) {
-  const url = `${BASE}/v2/groups/${groupId}/topics/${topicId}/comments?count=${count}`;
+// 拉某 topic 的评论,按 likes 降序。端点 /v2/topics/<topic_id>/comments(不带 group)。
+// topicId 必须是精确字符串(见 parseZsxqJson);响应同样走 parseZsxqJson 保 comment_id 精度。
+export async function fetchComments({ topicId, fetch: f = fetch, count = 20 }) {
+  const url = `${BASE}/v2/topics/${topicId}/comments?count=${count}`;
   const resp = await f(url, { credentials: 'include' });
-  const data = await resp.json();
+  const data = parseZsxqJson(await resp.text());
   if (!data.succeeded) throw new Error('zsxq comments API 错误: ' + (data.error || data.code));
   const comments = (data?.resp_data?.comments || []).map(mapComment);
   comments.sort((a, b) => b.likes - a.likes);
   return comments;
 }
 ```
-- [ ] **Step 4:** 运行确认通过
-- [ ] **Step 5:** Commit `feat: zsxq-api 加 fetchComments`
+
+- [ ] **Step 7:** 运行全量 `npm test` 确认通过。
+- [ ] **Step 8:** Commit `feat: zsxq-api fetchComments(端点不带 group)+ 修大整数 ID 精度`
 
 ---
 
@@ -251,7 +293,7 @@ async function handleScanToday({ groupId, todayStr, sinceDays = 1, history = [] 
     } else {
       // 未命中:拉评论 → 拼 textForAI → AI 评 utility
       let comments = [];
-      try { comments = await fetchComments({ groupId, topicId: t.topic_id }); }
+      try { comments = await fetchComments({ topicId: t.topic_id }); }
       catch (e) { /* 降级:无评论 */ }
       const topComments = comments.slice(0, 3)
         .map(c => `- ${c.text.replace(/\n/g, ' ').slice(0, 200)}(赞${c.likes})`).join('\n');
