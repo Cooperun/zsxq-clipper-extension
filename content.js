@@ -81,6 +81,32 @@
     return `assets/${folder}/${hash}.${ext}`;
   }
 
+  // 读 ~/zsxq-clips/.archived/*.md 作为历史,支撑 novelty(与已入库帖比对)
+  async function buildHistory() {
+    try {
+      const dir = await getClipDir(); // 可能抛"未授权目录"
+      const archDir = await dir.getDirectoryHandle('.archived');
+      const names = [];
+      for await (const [name, handle] of archDir.entries()) {
+        if (handle.kind === 'file' && name.endsWith('.md')) names.push(name);
+      }
+      const history = [];
+      for (const name of names.slice(0, 60)) {
+        try {
+          const fh = await archDir.getFileHandle(name);
+          const f = await fh.getFile();
+          const raw = await f.text();
+          const body = raw.replace(/^---[\s\S]*?---/, '').replace(/\n+/g, ' ').slice(0, 200);
+          const title = name.replace(/^\d{4}-\d{2}-\d{2}_zsxq_/, '').replace(/_?\d{4}-\d{2}-\d{2}T.*$/, '').replace(/\.md$/, '').slice(0, 60);
+          history.push({ title, textPrefix: body });
+        } catch (e) { /* 跳过单文件错误 */ }
+      }
+      return history;
+    } catch (e) {
+      return []; // 句柄未授权 / 无 .archived → 空,novelty 降级 1
+    }
+  }
+
   // 简单 hash（用 URL 生成短文件名）
   function hashUrl(url) {
     let h = 0;
@@ -735,7 +761,8 @@
     const sinceDays = parseInt(rangeSel?.value || '7', 10);
     list.innerHTML = `<div style="color:#ffc93c">⏳ 扫描近 ${sinceDays} 天,评分中(粗筛后逐条 AI 评,稍候)...</div>`;
     const todayStr = new Date().toDateString();
-    chrome.runtime.sendMessage({ type: 'scanToday', groupId, todayStr, sinceDays }, resp => {
+    const history = await buildHistory();
+    chrome.runtime.sendMessage({ type: 'scanToday', groupId, todayStr, sinceDays, history }, resp => {
       if (chrome.runtime.lastError) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(chrome.runtime.lastError.message) + '</div>'; return; }
       if (!resp || !resp.ok) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(resp?.error || '失败') + '</div>'; return; }
       if (!resp.topics || !resp.topics.length) { list.innerHTML = '<div>' + escHtml(resp.note || '该时间段无内容') + '</div>'; return; }
