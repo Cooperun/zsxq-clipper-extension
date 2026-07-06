@@ -733,8 +733,12 @@
     const state = loadBarState();
     const bar = document.createElement('div');
     bar.id = 'zsxq-curation-bar';
-    const posCss = state.left != null ? `left:${state.left}px;` : 'right:0;';
-    bar.style.cssText = `position:fixed;${posCss}top:${state.top != null ? state.top : 60}px;width:320px;max-height:80vh;overflow-y:auto;background:#1a1a2e;color:#eee;z-index:99999;border:2px solid #4ecca3;border-radius:8px;padding:10px;font-size:13px;box-shadow:-2px 0 12px rgba(0,0,0,.4)`;
+    // 加载保存位置时夹到屏内,防越界(分辨率变小/换显示器时旧位置可能超出视口)
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const clampedLeft = state.left != null ? Math.max(0, Math.min(state.left, vw - 60)) : null;
+    const clampedTop = state.top != null ? Math.max(0, Math.min(state.top, vh - 40)) : 60;
+    const posCss = clampedLeft != null ? `left:${clampedLeft}px;` : 'right:0;';
+    bar.style.cssText = `position:fixed;${posCss}top:${clampedTop}px;width:320px;max-height:80vh;overflow-y:auto;background:#1a1a2e;color:#eee;z-index:99999;border:2px solid #4ecca3;border-radius:8px;padding:10px;font-size:13px;box-shadow:-2px 0 12px rgba(0,0,0,.4)`;
     bar.innerHTML = `
       <div id="zsxq-cur-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:move;user-select:none">
         <b id="zsxq-cur-title">⭐ AI 精选</b>
