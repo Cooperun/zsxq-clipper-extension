@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapTopic, fetchToday, fetchComments, mapComment } from '../lib/zsxq-api.mjs';
+import { mapTopic, fetchToday, fetchComments, mapComment, fetchZsxqWithRetry } from '../lib/zsxq-api.mjs';
 
 test('mapTopic: API 原始字段 → 内部摘要(实测字段)', () => {
   const raw = {
@@ -58,4 +58,28 @@ test('fetchComments: URL 不带 group + cookie + 按 likes 降序', async () => 
   assert.equal(cs.length, 2);
   assert.equal(cs[0].likes, 10); // 降序
   assert.equal(cs[0].owner, 'b'); // 降序对应作者
+});
+
+test('fetchZsxqWithRetry: 1059 一次后成功 → 重试通过', async () => {
+  let calls = 0;
+  const fakeFetch = async () => {
+    calls++;
+    if (calls === 1) return { text: async () => '{"succeeded":false,"code":1059,"error":"内部错误"}' };
+    return { text: async () => '{"succeeded":true,"resp_data":{"topics":[]}}' };
+  };
+  const data = await fetchZsxqWithRetry('u', fakeFetch, { sleep: async () => {} });
+  assert.equal(data.succeeded, true);
+  assert.equal(calls, 2);
+});
+
+test('fetchZsxqWithRetry: 连续 1059 → 重试耗尽抛错(含 1059)', async () => {
+  const fakeFetch = async () => ({ text: async () => '{"succeeded":false,"code":1059,"error":"内部错误"}' });
+  await assert.rejects(fetchZsxqWithRetry('u', fakeFetch, { retries: 2, sleep: async () => {} }), /1059/);
+});
+
+test('fetchZsxqWithRetry: 非限流错误(14001)→ 立即抛,不重试', async () => {
+  let calls = 0;
+  const fakeFetch = async () => { calls++; return { text: async () => '{"succeeded":false,"code":14001,"error":"无效的count"}' }; };
+  await assert.rejects(fetchZsxqWithRetry('u', fakeFetch, { sleep: async () => {} }), /14001/);
+  assert.equal(calls, 1); // 只调一次,没重试
 });
