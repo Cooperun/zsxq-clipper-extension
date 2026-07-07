@@ -646,6 +646,37 @@
     const ep = document.getElementById('zsxq-set-endpoint');
     if (ep) ep.style.display = v === 'custom' ? 'block' : 'none';
   }
+  // 设置面板 token 用量 7 日柱状图(纯 CSS)。读 chrome.storage.local 的 tokenUsage。
+  function renderTokenChart() {
+    chrome.storage.local.get('tokenUsage', r => {
+      const u = r.tokenUsage || {};
+      const box = document.getElementById('zsxq-token-chart');
+      const sum = document.getElementById('zsxq-token-summary');
+      if (!box) return;
+      // 近 7 天日期键(UTC,YYYY-MM-DD):今天往前 i=6..0
+      const now = new Date();
+      const baseY = now.getUTCFullYear();
+      const baseM = now.getUTCMonth();
+      const baseD = now.getUTCDate();
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const dt = new Date(Date.UTC(baseY, baseM, baseD));
+        dt.setUTCDate(dt.getUTCDate() - i);
+        days.push(dt.toISOString().slice(0, 10));
+      }
+      const vals = days.map(d => (u[d] && u[d].total) || 0);
+      const max = Math.max(1, ...vals);
+      box.innerHTML = days.map((d, i) => {
+        const v = vals[i];
+        const h = Math.round((v / max) * 100);
+        const dd = d.slice(5);
+        return `<div title="${d}: ${v} tokens" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%"><span style="font-size:8px;color:#666">${dd}</span><div style="width:100%;background:${v ? '#4ecca3' : '#333'};height:${h}%;border-radius:2px"></div></div>`;
+      }).join('');
+      const today = days[6];
+      const t = u[today];
+      if (sum) sum.textContent = `今日 ${today.slice(5)}: ${t ? t.total : 0} tokens / ${t ? t.calls : 0} 次`;
+    });
+  }
   function loadSettings() {
     chrome.storage.local.get(['apiKey', 'model', 'focus', 'provider', 'endpoint'], r => {
       const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
@@ -655,6 +686,7 @@
       set('zsxq-set-model', r.model);
       set('zsxq-set-focus', r.focus);
       toggleEndpointField();
+      renderTokenChart();
     });
   }
   function saveSettings() {
@@ -757,6 +789,11 @@
         <input id="zsxq-set-model" placeholder="模型(留空用默认)" style="width:100%;margin-bottom:4px;box-sizing:border-box;padding:4px;background:#222;color:#eee;border:1px solid #444;border-radius:3px">
         <textarea id="zsxq-set-focus" rows="2" placeholder="关注领域(评分参考)" style="width:100%;margin-bottom:4px;box-sizing:border-box;padding:4px;background:#222;color:#eee;border:1px solid #444;border-radius:3px"></textarea>
         <button id="zsxq-set-save" style="background:#4ecca3;border:0;border-radius:4px;padding:4px 14px;cursor:pointer;color:#111">保存</button><span id="zsxq-set-msg" style="color:#4ecca3;margin-left:8px"></span>
+          <div style="margin-top:8px;border-top:1px solid #333;padding-top:6px">
+            <div style="color:#4ecca3;font-size:11px;margin-bottom:4px">📊 Token 用量(近7天)</div>
+            <div id="zsxq-token-chart" style="display:flex;align-items:flex-end;gap:3px;height:48px"></div>
+            <div id="zsxq-token-summary" style="color:#8b8baf;font-size:10px;margin-top:3px"></div>
+          </div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;color:#8b8baf">
         时间范围:
