@@ -144,6 +144,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleScanToday(msg).then(sendResponse).catch(e => sendResponse({ ok: false, error: e.message }));
     return true;
   }
+  if (msg.type === 'fetchComments') {
+    // 全文阅读视图拉评论展示(复用 lib fetchComments)
+    fetchComments({ topicId: msg.topicId })
+      .then(comments => sendResponse({ ok: true, comments }))
+      .catch(e => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
   if (msg.type === 'openOptions') {
     // content script 调 openOptionsPage 不可靠,由 background 代理
     chrome.runtime.openOptionsPage().catch(() => {});
