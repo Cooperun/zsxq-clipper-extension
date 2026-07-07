@@ -77,6 +77,8 @@
 | 19301 | 无效的 scope 值 |
 | 1059 | 内部错误 |
 | 15403 | 主题已经被删除(也见于 topic_id 不精确/被截断时) |
+| 17801 | 无效的 count(评论 API,count>30 触发) |
+| 1018 | 无效的请求参数(如评论 API 的 sort=likes_count) |
 
 ## 9. 评论 API
 
@@ -86,7 +88,7 @@
 > 正确路径是 `/v2/topics/{topic_id}/comments`(2026-07-06 实测确认)。
 
 - **认证**:同上,httpOnly cookie(`credentials:'include'`)。
-- **query**:`count`(每页条数,必填,缺省报错)。默认按时间顺序;`resp_data.index` 为分页游标(本扩展只用首页 top N,不翻页)。
+- **query**:`count`(每页条数,必填,缺省报错)。**上限实测 ≤30**,`count=50` 报 17801「无效的count」(本扩展用 30)。默认按时间顺序;`resp_data.index` 为分页游标(本扩展只用首页 top N,不翻页)。**不支持服务端按赞排序**(`sort=likes_count` 报 1018),要"按赞"只能客户端拉首页 N 条再排。
 - **`topic_id` 必须是精确字符串**(见第 10 段),否则报 15403「主题已经被删除」。
 
 ### 响应结构

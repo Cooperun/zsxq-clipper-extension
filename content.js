@@ -836,7 +836,7 @@
     document.getElementById('zsxq-reader-close').addEventListener('click', () => closeReader());
     // 拉评论(top N by 赞)渲染在正文下方。cBox 是闭包捕获的当前节点;若用户已关闭阅读视图,写入脱离 DOM 的旧节点是无害 no-op。
     const cBox = document.getElementById('zsxq-reader-comments');
-    chrome.runtime.sendMessage({ type: 'fetchComments', topicId: t.topic_id, count: 50 }, resp => {
+    chrome.runtime.sendMessage({ type: 'fetchComments', topicId: t.topic_id, count: 30 }, resp => {
       if (chrome.runtime.lastError || !resp || !resp.ok) {
         cBox.innerHTML = '<div style="color:#ff6b6b;font-size:11px">评论加载失败: ' + escHtml(chrome.runtime.lastError?.message || resp?.error || '失败') + '</div>';
         return;
