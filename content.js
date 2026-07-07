@@ -785,28 +785,70 @@
   let lastCurTopics = null; // 闭包级:closeReader 重建列表时复用,避免返回后空栏
 
   // 渲染精选卡片列表(scanToday 成功 + closeReader 重建 都调它,DRY)
-  function renderCuration(topics) {
+  async function renderCuration(topics) {
     lastCurTopics = topics;
     const list = document.getElementById('zsxq-curation-list');
     if (!list) return;
     if (!topics || !topics.length) { list.innerHTML = '<div>该时间段无内容</div>'; return; }
+    const fb = (await chrome.storage.local.get('feedback')).feedback || [];
+    const rated = {}; for (const f of fb) rated[f.topic_id] = f.userScore;
     list.innerHTML = topics.map((t, i) => {
       const dt = t.create_time ? new Date(t.create_time).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
       const imgs = (t.images && t.images.length) ? '<div style="margin-top:4px">' + t.images.map(u => `<a href="${escHtml(u)}" target="_blank" rel="noopener" style="color:#7aa2ff;font-size:11px;margin-right:6px">🖼 图</a>`).join('') + '</div>' : '';
+      const mark = rated[t.topic_id] != null ? ` <span style="color:#4ecca3;font-size:10px">✓ 你评${escHtml(rated[t.topic_id])}</span>` : '';
       return `
         <div style="background:#222244;border-radius:6px;padding:8px;margin-bottom:6px">
-          <div>⭐${escHtml(t.score)} <b>${escHtml(t.title)}</b></div>
+          <div>⭐${escHtml(t.score)} <b>${escHtml(t.title)}</b>${mark}</div>
           <div style="color:#8b8baf;font-size:11px">${escHtml(dt)} · ${escHtml(t.author)} · ❤️${escHtml(t.likes)} · 💬${escHtml(t.comments)}</div>
           <div style="color:#aaa;font-size:11px;margin:3px 0">${escHtml(t.reason || '')}</div>
           <div style="color:#9a9aff;font-size:10px;margin:2px 0">F${escHtml(t.freshness)} · N${escHtml(t.novelty)} · U${escHtml(t.utility)}</div>
           <button class="zsxq-cur-save" data-id="${escHtml(t.topic_id)}" style="font-size:11px;padding:2px 8px;background:#4ecca3;border:0;border-radius:3px;cursor:pointer;color:#111">📋 收</button>
           <button class="zsxq-cur-full-btn" data-i="${i}" style="font-size:11px;padding:2px 8px;background:#333;border:0;border-radius:3px;cursor:pointer;color:#eee;margin-left:6px">📄 全文</button>
+          <button class="zsxq-cur-rate-btn" data-i="${i}" data-score="${escHtml(rated[t.topic_id] != null ? rated[t.topic_id] : '')}" data-reason="" style="font-size:11px;padding:2px 8px;background:#333;border:0;border-radius:3px;cursor:pointer;color:#eee;margin-left:6px">✎ 我评</button>
+          <div class="zsxq-cur-rate-form" data-i="${i}" style="display:none;margin-top:6px">分:<select class="zsxq-rate-score">${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}">${n}</option>`).join('')}</select> <input class="zsxq-rate-reason" placeholder="理由(可选)" style="background:#11112a;color:#eee;border:1px solid #333;border-radius:3px;padding:2px 6px;font-size:11px;width:60%"> <button class="zsxq-rate-save" style="font-size:11px;padding:2px 8px;background:#4ecca3;border:0;border-radius:3px;cursor:pointer;color:#111">保存</button></div>
         </div>`;
     }).join('');
     list.querySelectorAll('.zsxq-cur-save').forEach(b =>
       b.addEventListener('click', () => saveFromCur(b.dataset.id, topics)));
     list.querySelectorAll('.zsxq-cur-full-btn').forEach(b =>
       b.addEventListener('click', () => expandReader(parseInt(b.dataset.i, 10), topics)));
+    list.querySelectorAll('.zsxq-cur-rate-btn').forEach(b =>
+      b.addEventListener('click', () => {
+        const i = b.dataset.i;
+        const form = list.querySelector(`.zsxq-cur-rate-form[data-i="${i}"]`);
+        if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
+      }));
+    list.querySelectorAll('.zsxq-rate-save').forEach(b =>
+      b.addEventListener('click', () => saveFeedback(b, topics)));
+  }
+
+  // [✎ 我评] 保存:发 addFeedback 给 background(走 lib 覆盖+上限),成功后标记卡片
+  function saveFeedback(saveBtn, topics) {
+    const card = saveBtn.closest('div[style*="222244"]');
+    const i = card.querySelector('.zsxq-cur-rate-btn').dataset.i;
+    const t = topics[parseInt(i, 10)];
+    if (!t) return;
+    const userScore = parseInt(card.querySelector('.zsxq-rate-score').value, 10);
+    const reason = card.querySelector('.zsxq-rate-reason').value.trim();
+    const entry = {
+      topic_id: t.topic_id, title: (t.title || '').slice(0, 50),
+      textSnippet: (t.text || '').slice(0, 80), aiScore: t.score, userScore, reason, ts: Date.now()
+    };
+    saveBtn.textContent = '...';
+    chrome.runtime.sendMessage({ type: 'addFeedback', entry }, resp => {
+      if (resp && resp.ok) {
+        card.querySelector('.zsxq-cur-rate-form').style.display = 'none';
+        // 更新标记
+        const mark = card.querySelector('span[style*="4ecca3"]');
+        if (mark) mark.remove();
+        const titleDiv = card.querySelector('div');
+        titleDiv.insertAdjacentHTML('beforeend', ` <span style="color:#4ecca3;font-size:10px">✓ 你评${userScore}</span>`);
+        lastCurTopics = topics; // 保持引用
+      } else {
+        saveBtn.textContent = '保存';
+        alert('反馈保存失败: ' + (resp?.error || '未知'));
+      }
+    });
   }
 
   // 全文阅读视图:悬浮框放大 + md 渲染单帖 + 拉评论展示
