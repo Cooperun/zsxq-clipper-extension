@@ -951,7 +951,7 @@
     const rangeSel = document.getElementById('zsxq-range');
     const sinceDays = parseInt(rangeSel?.value || '7', 10);
     list.innerHTML = `<div style="color:#ffc93c">⏳ 扫描近 ${sinceDays} 天,评分中(粗筛后逐条 AI 评,稍候)...</div>`;
-    const todayStr = new Date().toDateString();
+    const todayStr = new Date().toISOString().slice(0, 10); // ISO YYYY-MM-DD:recordTokens 的 daysBefore 与柱状图日期键都按 ISO 算
     const history = await buildHistory();
     chrome.runtime.sendMessage({ type: 'scanToday', groupId, todayStr, sinceDays, history }, resp => {
       if (chrome.runtime.lastError) { list.innerHTML = '<div style="color:#ff6b6b">❌ ' + escHtml(chrome.runtime.lastError.message) + '</div>'; return; }

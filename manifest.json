@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "知识星球剪藏",
-  "version": "6.2.0",
+  "version": "6.2.1",
   "description": "AI 精选筛选 + 剪藏为 Markdown(支持外链正文抓取、本地落盘)",
   "permissions": ["tabs", "scripting", "storage", "downloads"],
   "host_permissions": ["*://*.zsxq.com/*"],

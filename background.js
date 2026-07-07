@@ -115,7 +115,9 @@ async function handleScanToday({ groupId, todayStr, sinceDays = 1, history = [] 
       const textForAI = topComments ? `${t.text}\n\n精选评论:\n${topComments}` : t.text;
       try {
         const s = await scoreOne({ text: textForAI, focus, feedback, guidance }, { apiKey, model, provider, endpoint });
-        if (s.usage) await recordTokens(store, todayStr, s.usage);
+        // token 记录是优化功能,单独兜底:绝不让它把一次成功的 AI 评分拖成 "AI 评分失败"
+        try { if (s.usage) await recordTokens(store, todayStr, s.usage); }
+        catch (e) { console.warn('[精选] token 记录失败,不阻塞:', e.message); }
         utility = { utility: s.score, reason: s.reason, tags: s.tags };
         await cache.set(ck, utility, todayStr);
       } catch (e) {

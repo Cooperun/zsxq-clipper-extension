@@ -51,3 +51,17 @@ test('recordTokens: usage 为 null 时跳过', async () => {
   const u = await getTokenUsage(s);
   assert.deepEqual(u, {});
 });
+
+// 回归:content.js 历史上误传过 toDateString("Tue Jul 07 2026"),daysBefore 拿它 split('-')
+// 解析出 NaN → toISOString 抛 RangeError,且 recordTokens 当时在 scoreOne 的 try 里,
+// 把一次成功的 AI 评分误吞成 "AI 评分失败",并导致 token 永远记不上。
+// 钉住契约:日期必须是 ISO YYYY-MM-DD;非 ISO 必须显式失败,绝不静默写一个柱状图读不到的坏键。
+test('recordTokens: 非 ISO 日期必须显式抛错,不写坏键(钉住调用方契约)', async () => {
+  const s = mockStore();
+  await assert.rejects(
+    () => recordTokens(s, 'Tue Jul 07 2026', { total_tokens: 1 }),
+    (err) => err instanceof RangeError || /Invalid time value/i.test(String(err && err.message))
+  );
+  const u = await getTokenUsage(s);
+  assert.deepEqual(u, {}, '抛错时不应写入任何坏键');
+});
