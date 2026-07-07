@@ -146,7 +146,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === 'fetchComments') {
     // 全文阅读视图拉评论展示(复用 lib fetchComments)
-    fetchComments({ topicId: msg.topicId })
+    fetchComments({ topicId: msg.topicId, count: msg.count })
       .then(comments => sendResponse({ ok: true, comments }))
       .catch(e => sendResponse({ ok: false, error: e.message }));
     return true;

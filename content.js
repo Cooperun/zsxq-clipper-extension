@@ -836,7 +836,7 @@
     document.getElementById('zsxq-reader-close').addEventListener('click', () => closeReader());
     // 拉评论(top N by 赞)渲染在正文下方。cBox 是闭包捕获的当前节点;若用户已关闭阅读视图,写入脱离 DOM 的旧节点是无害 no-op。
     const cBox = document.getElementById('zsxq-reader-comments');
-    chrome.runtime.sendMessage({ type: 'fetchComments', topicId: t.topic_id }, resp => {
+    chrome.runtime.sendMessage({ type: 'fetchComments', topicId: t.topic_id, count: 50 }, resp => {
       if (chrome.runtime.lastError || !resp || !resp.ok) {
         cBox.innerHTML = '<div style="color:#ff6b6b;font-size:11px">评论加载失败: ' + escHtml(chrome.runtime.lastError?.message || resp?.error || '失败') + '</div>';
         return;
@@ -848,7 +848,7 @@
         '<b style="color:#7aa2ff">' + escHtml(c.owner) + '</b> <span style="color:#666">❤️' + escHtml(c.likes) + '</span>' +
         '<div style="color:#ccc;margin-top:2px;white-space:pre-wrap">' + escHtml(c.text) + '</div></div>'
       ).join('');
-      cBox.innerHTML = '<div style="color:#4ecca3;font-size:12px;margin-bottom:4px">💬 评论(top ' + Math.min(cs.length, 10) + ' by 赞)</div>' + items;
+      cBox.innerHTML = '<div style="color:#4ecca3;font-size:12px;margin-bottom:4px">💬 评论(共 ' + cs.length + ' 条,按赞排序,显示前 ' + Math.min(cs.length, 10) + ')</div>' + items;
     });
   }
 
