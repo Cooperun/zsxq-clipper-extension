@@ -1,9 +1,10 @@
 // background.js v6 — ESM Service Worker
 import { coarseFilter } from './lib/filter.mjs';
-import { scoreOne } from './lib/ai-scorer.mjs';
+import { scoreOne, regenerateGuidance } from './lib/ai-scorer.mjs';
 import { makeCache, keyFor } from './lib/cache.mjs';
 import { fetchToday, fetchComments } from './lib/zsxq-api.mjs';
 import { computeFreshness, computeNovelty, computeTotalScore } from './lib/scorer.mjs';
+import { addFeedback, recordTokens } from './lib/feedback.mjs';
 
 const SERVER = 'http://127.0.0.1:8765/clip'; // 保留作可选 fallback
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -64,8 +65,27 @@ async function fetchArticleViaTab(url) {
 
 // 新增:scanToday 编排
 async function handleScanToday({ groupId, todayStr, sinceDays = 1, history = [] }) {
-  const { apiKey, focus, model, provider, endpoint } = await chrome.storage.local.get(['apiKey', 'focus', 'model', 'provider', 'endpoint']);
+  const cfg = await chrome.storage.local.get(['apiKey', 'focus', 'model', 'provider', 'endpoint', 'feedback', 'guidance', 'guidanceVersion', 'feedbackSeen']);
+  const { apiKey, focus, model, provider, endpoint } = cfg;
   if (!apiKey) return { ok: false, error: '未设置 API key,请点 ⚙️ 填写' };
+
+  let feedback = cfg.feedback || [];
+  let guidance = cfg.guidance || '';
+  let guidanceVersion = cfg.guidanceVersion || 0;
+  const feedbackSeen = cfg.feedbackSeen || 0;
+
+  // C: 攒满 20 条新增反馈 → 自动重生成 guidance(失败降级,不阻塞)
+  if (feedback.length - feedbackSeen >= 20 && feedback.length >= 20) {
+    try {
+      const r = await regenerateGuidance({ feedback, fetch, apiKey, model, provider, endpoint });
+      if (r.usage) await recordTokens(store, todayStr, r.usage);
+      if (r.guidance) {
+        guidance = r.guidance;
+        guidanceVersion += 1;
+        await chrome.storage.local.set({ guidance, guidanceVersion, feedbackSeen: feedback.length });
+      }
+    } catch (e) { console.warn('[精选] guidance 重生成失败,下次再试:', e.message); }
+  }
 
   const sinceTs = Date.now() - sinceDays * 86400000;
   const isBeforeRange = (ts) => new Date(ts).getTime() < sinceTs;
@@ -81,14 +101,12 @@ async function handleScanToday({ groupId, todayStr, sinceDays = 1, history = [] 
   const limit = 50;
   for (let i = 0; i < Math.min(candidates.length, limit); i++) {
     const t = candidates[i];
-    const ck = keyFor(t);
+    const ck = keyFor(t, guidanceVersion);
     const hit = await cache.get(ck, todayStr);
     let utility;
     if (hit && typeof hit.utility === 'number') {
-      // 命中缓存:utility 复用,跳过评论拉取(评论只为 AI 评分服务,不缓存)
-      utility = hit;
+      utility = hit;                                   // 命中:复用,跳过评论/token
     } else {
-      // 未命中:拉评论 → 拼 textForAI → AI 评 utility
       let comments = [];
       try { comments = await fetchComments({ topicId: t.topic_id }); }
       catch (e) { /* 降级:无评论 */ }
@@ -96,14 +114,14 @@ async function handleScanToday({ groupId, todayStr, sinceDays = 1, history = [] 
         .map(c => `- ${c.text.replace(/\n/g, ' ').slice(0, 200)}(赞${c.likes})`).join('\n');
       const textForAI = topComments ? `${t.text}\n\n精选评论:\n${topComments}` : t.text;
       try {
-        const s = await scoreOne({ text: textForAI, focus }, { apiKey, model, provider, endpoint });
+        const s = await scoreOne({ text: textForAI, focus, feedback, guidance }, { apiKey, model, provider, endpoint });
+        if (s.usage) await recordTokens(store, todayStr, s.usage);
         utility = { utility: s.score, reason: s.reason, tags: s.tags };
         await cache.set(ck, utility, todayStr);
       } catch (e) {
         utility = { utility: 0, reason: 'AI 评分失败', tags: [] };
       }
     }
-    // freshness / novelty 本地算(每次现算,不缓存 —— 随时间/历史变化)
     const freshness = computeFreshness(t.create_time);
     const novelty = computeNovelty(t, history);
     const total = computeTotalScore({ freshness, novelty, utility: utility.utility });
@@ -148,6 +166,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // 全文阅读视图拉评论展示(复用 lib fetchComments)
     fetchComments({ topicId: msg.topicId, count: msg.count })
       .then(comments => sendResponse({ ok: true, comments }))
+      .catch(e => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === 'addFeedback') {
+    addFeedback(store, msg.entry)
+      .then(feedback => sendResponse({ ok: true, feedback }))
       .catch(e => sendResponse({ ok: false, error: e.message }));
     return true;
   }
