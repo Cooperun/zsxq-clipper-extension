@@ -297,7 +297,7 @@
     const header = container.querySelector('app-topic-header');
     const authorEl = header?.querySelector('.author');
     const authorRaw = authorEl?.textContent?.trim() || '';
-    // authorRaw 可能是 "stormzhang2026-05-20 00:01" 需要分离
+    // authorRaw 可能是 "某星主2026-05-20 00:01" 需要分离
     const authorMatch = authorRaw.match(/^(.+?)(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})$/);
     const author = authorMatch ? authorMatch[1].trim() : authorRaw.replace(/\d{4}-\d{2}-\d{2}.+$/, '').trim() || '未知作者';
 

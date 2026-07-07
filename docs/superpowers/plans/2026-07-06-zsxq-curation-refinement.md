@@ -33,7 +33,7 @@
 
 - [ ] **Step 1:** 在登录态星球页(Chrome DevTools console 或 chrome-devtools-mcp)执行:
 ```javascript
-fetch('https://api.zsxq.com/v2/groups/2421112121/topics/45544244255885450/comments?count=5', {credentials:'include'}).then(r=>r.json()).then(d=>console.log(JSON.stringify({suc:d.succeeded,code:d.code,err:d.error,keys:Object.keys(d),rdKeys:Object.keys(d.resp_data||{}),n:d.resp_data?.comments?.length,c0keys:d.resp_data?.comments?.[0]&&Object.keys(d.resp_data.comments[0]),c0sample:d.resp_data?.comments?.[0]&&JSON.stringify(d.resp_data.comments[0]).slice(0,500)})))
+fetch('https://api.zsxq.com/v2/groups/<group_id>/topics/<topic_id>/comments?count=5', {credentials:'include'}).then(r=>r.json()).then(d=>console.log(JSON.stringify({suc:d.succeeded,code:d.code,err:d.error,keys:Object.keys(d),rdKeys:Object.keys(d.resp_data||{}),n:d.resp_data?.comments?.length,c0keys:d.resp_data?.comments?.[0]&&Object.keys(d.resp_data.comments[0]),c0sample:d.resp_data?.comments?.[0]&&JSON.stringify(d.resp_data.comments[0]).slice(0,500)})))
 ```
 - [ ] **Step 2:** 把结果(端点 URL、认证、`resp_data.comments[]` 字段:文本/作者/点赞/时间)追加到 `docs/api-reference.md` 新增的「9. 评论 API」段。若字段与下方 Task 5 的 `mapComment` 推测不同(`text`/`owner.name`/`likes_count`),以实测为准,先改 Task 5 的 `mapComment`。
 - [ ] **Step 3:** Commit
